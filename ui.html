@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Figma Variables Manager</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50 p-4 text-gray-800 font-sans">
+  <h2 class="text-xl font-bold mb-2">Variables Import/Export</h2>
+  <small class="block text-gray-500 mb-4">Import, export, and manage color variables and palettes in your Figma project.</small>
+
+  <div class="mb-6">
+    <h3 class="mb-1 text-base font-semibold">Export</h3>
+    <button id="export" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 w-full mb-1" title="Export all local variables to a JSON file">Export Variables</button>
+    <small class="block text-xs text-gray-400 mb-2">Download all local Figma variables as a JSON file for backup or migration.</small>
+  </div>
+
+  <div class="mb-6">
+    <h3 class="mb-1 text-base font-semibold">Utilities</h3>
+    <button id="renameFrames" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 w-full mb-1" title="Rename selected frames by their inner text">Rename Frames by Text</button>
+    <small class="block text-xs text-gray-400 mb-2">Rename selected frames using the first text node inside each frame.</small>
+  </div>
+
+  <div class="mb-6">
+    <h3 class="mb-1 text-base font-semibold">Import</h3>
+    <div class="mb-2 flex flex-wrap gap-4">
+      <label class="text-sm flex items-center">
+        <input type="radio" name="importMethod" value="file" checked class="mr-1"> From file
+      </label>
+      <label class="text-sm flex items-center">
+        <input type="radio" name="importMethod" value="text" class="mr-1"> Paste JSON
+      </label>
+      <label class="text-sm flex items-center">
+        <input type="radio" name="importMethod" value="palette" class="mr-1"> Palette Import
+      </label>
+    </div>
+
+    <!-- File Import -->
+    <div id="fileImport" class="mb-2">
+      <input type="file" id="fileInput" accept=".json" class="w-full mb-2 border border-gray-300 rounded px-2 py-1">
+    </div>
+
+    <!-- Text Import -->
+    <div id="textImport" style="display: none;" class="mb-2">
+      <textarea id="jsonTextarea" placeholder="Paste JSON code here..." class="w-full h-28 font-mono text-xs resize-vertical border border-gray-300 p-2 rounded"></textarea>
+    </div>
+
+    <!-- Palette Import -->
+    <div id="paletteImport" style="display: none;" class="mb-2">
+      <p class="text-xs text-gray-600 mb-2">
+        1. Select main folders (each folder = 1 mode)<br>
+        2. Structure: Main folder > Color > objects with colors<br>
+        3. Objects must contain text with numbers (50, 100, 200, etc.)<br>
+        4. At least 5 colors in each palette<br>
+        5. Click "Scan Selection"
+      </p>
+      <button id="scanSelection" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 w-full mb-1" title="Scan selected folders for palettes">Scan Selection</button>
+      <div id="paletteStatus" class="mt-2 text-xs"></div>
+    </div>
+
+    <button id="import" disabled class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 w-full mb-1" title="Import variables from selected method">Import Variables</button>
+    <small class="block text-xs text-gray-400 mb-2">Import variables from a JSON file, pasted code, or scanned palette.</small>
+  </div>
+
+  <button id="cancel" class="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 w-full mb-2" title="Close plugin">Cancel</button>
+  <div id="status" class="mt-2 text-xs text-gray-600"></div>
+
+<script>
+const fileInput = document.getElementById('fileInput');
+const jsonTextarea = document.getElementById('jsonTextarea');
+const importBtn = document.getElementById('import');
+const fileImport = document.getElementById('fileImport');
+const textImport = document.getElementById('textImport');
+const paletteImport = document.getElementById('paletteImport');
+const importMethodRadios = document.querySelectorAll('input[name="importMethod"]');
+
+let fileData = null;
+let currentMethod = 'file';
+let paletteData = null;
+
+// Переключение между методами импорта
+importMethodRadios.forEach(radio => {
+  radio.onchange = () => {
+    currentMethod = radio.value;
+    fileImport.style.display = currentMethod === 'file' ? 'block' : 'none';
+    textImport.style.display = currentMethod === 'text' ? 'block' : 'none';
+    paletteImport.style.display = currentMethod === 'palette' ? 'block' : 'none';
+    
+    importBtn.disabled = true;
+    fileData = null;
+    paletteData = null;
+    updateStatus('');
+  };
+});
+
+// File input validation
+function checkFileInput() {
+  const file = fileInput.files[0];
+  if (file && file.type === 'application/json') {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        fileData = e.target.result;
+        JSON.parse(fileData);
+        importBtn.disabled = false;
+        updateStatus('File loaded and ready to import', '#00aa00');
+      } catch (error) {
+        updateStatus('Error: Invalid JSON file', '#ff4444');
+        importBtn.disabled = true;
+      }
+    };
+    reader.readAsText(file);
+  } else {
+    importBtn.disabled = true;
+    fileData = null;
+  }
+}
+
+// Text input validation
+function checkTextInput() {
+  const text = jsonTextarea.value.trim();
+  if (text) {
+    try {
+      JSON.parse(text);
+      fileData = text;
+      importBtn.disabled = false;
+      updateStatus('JSON code is valid and ready to import', '#00aa00');
+    } catch (error) {
+      updateStatus('Error: Invalid JSON code', '#ff4444');
+      importBtn.disabled = true;
+      fileData = null;
+    }
+  } else {
+    importBtn.disabled = true;
+    fileData = null;
+    updateStatus('');
+  }
+}
+
+// Обновление статуса
+function updateStatus(message, color = '#666') {
+  const status = document.getElementById('status');
+  status.textContent = message;
+  status.style.color = color;
+}
+
+// Обработчики событий
+fileInput.onchange = checkFileInput;
+jsonTextarea.oninput = checkTextInput;
+
+// Rename frames
+document.getElementById('renameFrames').onclick = () => {
+  updateStatus('Renaming frames...', '#666');
+  parent.postMessage({ 
+    pluginMessage: { type: 'rename-frames' } 
+  }, '*');
+}
+
+// Scan palette
+document.getElementById('scanSelection').onclick = () => {
+  updateStatus('Scanning selected objects...', '#666');
+  parent.postMessage({ 
+    pluginMessage: { type: 'scan-palette' } 
+  }, '*');
+}
+
+// Export
+document.getElementById('export').onclick = () => {
+  updateStatus('Exporting...', '#666');
+  parent.postMessage({ 
+    pluginMessage: { type: 'export-variables' } 
+  }, '*');
+}
+
+// Import
+importBtn.onclick = () => {
+  if (currentMethod === 'palette' && paletteData) {
+    updateStatus('Creating variables from palette...', '#666');
+    parent.postMessage({ 
+      pluginMessage: { 
+        type: 'import-palette',
+        data: paletteData
+      } 
+    }, '*');
+  } else if (fileData) {
+    updateStatus('Importing variables...', '#666');
+    parent.postMessage({ 
+      pluginMessage: { 
+        type: 'import-variables',
+        data: fileData
+      } 
+    }, '*');
+  }
+}
+
+document.getElementById('cancel').onclick = () => {
+  parent.postMessage({ 
+    pluginMessage: { type: 'cancel' } 
+  }, '*');
+}
+
+// Handle plugin responses
+window.onmessage = (event) => {
+  const message = event.data.pluginMessage;
+  
+  if (message.type === 'download-json') {
+    const blob = new Blob([message.data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = message.filename || 'figma-variables.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    updateStatus('File downloaded!', '#00aa00');
+  }
+  
+  if (message.type === 'rename-success') {
+    updateStatus(message.message, '#00aa00');
+  }
+  
+  if (message.type === 'palette-scanned') {
+    const paletteStatus = document.getElementById('paletteStatus');
+    paletteStatus.innerHTML = `
+      <strong>Found:</strong><br>
+      ${message.modes.map(mode => `• ${mode.name} (${Object.keys(mode.colors).length} colors)`).join('<br>')}
+    `;
+    paletteStatus.style.color = '#00aa00';
+    
+    paletteData = message.data;
+    importBtn.disabled = false;
+    updateStatus('Palette is ready to import!', '#00aa00');
+  }
+  
+  if (message.type === 'import-success') {
+    updateStatus(message.message, '#00aa00');
+    
+    // Clear fields after successful import
+    if (currentMethod === 'file') {
+      fileInput.value = '';
+    } else if (currentMethod === 'text') {
+      jsonTextarea.value = '';
+    } else if (currentMethod === 'palette') {
+      document.getElementById('paletteStatus').innerHTML = '';
+      paletteData = null;
+    }
+    importBtn.disabled = true;
+    fileData = null;
+  }
+  
+  if (message.type === 'error') {
+    updateStatus(message.message, '#ff4444');
+  }
+}
+</script>
